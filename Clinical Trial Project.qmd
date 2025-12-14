@@ -71,16 +71,13 @@ filter(if_all(c(`Conditions`, Phases, Interventions, Locations), ~ is.na(.)))
 ct_gov_data <- missing_data_clinical_trial%>%
 filter(!if_all(c(`Conditions`, Phases, `Interventions`, Locations), ~ is.na(.)))
 
-#change dataset to lowercase for easier analysis
 
-mapping_1_ct_gov <- ct_gov_data%>%
-mutate(Sponsor = tolower(Sponsor))
 
 #Sponsor Mapping:Sponsor Type
-mapping_2_ct_gov <-ct_gov_data%>%
-mutate(Sponsor_Type =case_when(str_detect(Sponsor, "university|University|hospital|hospital|college|universitaire|universidade|universiteit
-|school|national cancer centre, singapore
-|m.d. anderson cancer center|Universidad|Universität|Langone|Anderson|Hershey
+mapping_1_ct_gov <-ct_gov_data%>%
+mutate(Sponsor_Type =case_when(str_detect(Sponsor, "University|university|hospital|Hospital|College|Universitaire|Universidade|Universiteit
+|School|National Cancer Centre, Singapore
+|M.D. Anderson Cancer Center|Universidad|Universität|Langone|Anderson|Hershey
 |Mayo|The Cleveland Clinic|Universitat|Università
 |Hospices Civils de Lyon|Institut|Institutet|Postgraduate|Centre|Center|Université") ~ "Academic", str_detect(Sponsor, "Ministry|Naval|Army|US Department of Veterans Affairs|Military|Centers for Disease Control and Prevention
 |Center for Disease Control and Prevention
@@ -94,7 +91,7 @@ mutate(Sponsor_Type =case_when(str_detect(Sponsor, "university|University|hospit
 
 #Therapeutic Area Mapping
 
-mapping_3_ct_gov <-mapping_2_ct_gov%>%
+mapping_2_ct_gov <-mapping_1_ct_gov%>%
 mutate(Therapeutic_Area = case_when(str_detect(`Study Title`, "Vaccine") ~ "Vaccine",str_detect(Conditions, "cancer|glioblastoma|glioma|carcinoma|melanoma|neoplasm|neuroblastoma|neoplasms
 |sarcoma") ~ "Oncology", str_detect(Conditions, "chronic cidney diseases|renal disease|kidney disease") ~ "Nephrology", str_detect(Conditions, "heart|blood vessel diseases
 |heart failure|hypertension") ~ "Cardiovascular", str_detect(Conditions, "Autoimmune|Rheumatoid Arthritis|Arthritis|Psoriasis|Osteoarthritis") ~ "Immunology", str_detect(Conditions, "Virus|HIV|Hiv|Bacteria|Parasites|Malaria|Dengue|TB|Tuberculosis
@@ -102,11 +99,11 @@ mutate(Therapeutic_Area = case_when(str_detect(`Study Title`, "Vaccine") ~ "Vacc
 
 #Study Status Mapping
 
-mapping_4_ct_gov <-mapping_3_ct_gov%>%
+mapping_3_ct_gov <-mapping_4_ct_gov%>%
 mutate(Enrollment_Status = case_when(str_detect(`Study Status`, "COMPLETED|ACTIVE_NOT_RECRUITING|TERMINATED|SUSPENDED|WITHDRAWN|ENROLLING_BY_INVITATION|UNKNOW") ~ "Actual", str_detect(`Study Status`, "RECRUITING|NOT_YET_RECRUITING|NO_LONGER_AVAILABLE|APPRROVED_FOR_MARKETING|AVAILABLE|TEMORARILY_NOT_AVAILABLE") ~ "Anticipated", TRUE ~ "Anticipated"))
 
 #Data tranformation: Intervention -> Investigational Product
-transform_1_ct_gov <- mapping_4_ct_gov%>%
+transform_1_ct_gov <- mapping_3_ct_gov%>%
 mutate(Investigational_Product = str_extract(Interventions, "^[^:]+"))
 
 #Data tranformation: Investigational Product (removal of underscore)
