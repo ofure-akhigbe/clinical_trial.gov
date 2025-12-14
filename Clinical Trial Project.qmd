@@ -99,7 +99,7 @@ mutate(Therapeutic_Area = case_when(str_detect(`Study Title`, "Vaccine") ~ "Vacc
 
 #Study Status Mapping
 
-mapping_3_ct_gov <-mapping_4_ct_gov%>%
+mapping_3_ct_gov <-mapping_2_ct_gov%>%
 mutate(Enrollment_Status = case_when(str_detect(`Study Status`, "COMPLETED|ACTIVE_NOT_RECRUITING|TERMINATED|SUSPENDED|WITHDRAWN|ENROLLING_BY_INVITATION|UNKNOW") ~ "Actual", str_detect(`Study Status`, "RECRUITING|NOT_YET_RECRUITING|NO_LONGER_AVAILABLE|APPRROVED_FOR_MARKETING|AVAILABLE|TEMORARILY_NOT_AVAILABLE") ~ "Anticipated", TRUE ~ "Anticipated"))
 
 #Data tranformation: Intervention -> Investigational Product
