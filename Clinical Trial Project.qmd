@@ -1,0 +1,242 @@
+---
+insta---
+title: "A machine learning model in R to predict the likelihood of Singapore participting in a clinical trial based on several variables characteristics"
+format: pdf
+editor: visual
+---
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+## Running Code
+
+When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+
+```{r}
+1 + 1
+```
+
+You can add options to executable code like this
+
+```{r}
+#| echo: false
+2 * 2
+```
+
+The `echo: false` option disables the printing of code (only output is displayed).
+
+```{r}
+library(clintrialx)
+library(tidyverse)
+library(dplyr)
+library(quanteda)
+library(tidytext)
+
+
+
+
+#Raw clinical trial data from clincaltrial.gov(ct_gov)
+
+ct_gov_raw <- ctg_bulk_fetch(location = NULL)
+
+#check for duplicated Trial ID
+duplicate_trial_ID <- ct_gov_raw%>%
+add_count(`NCT Number`)%>%
+mutate(duplicate_trial = ifelse(n >1, "Duplicate", "Unique"))
+#mutate (duplicates_trial = Duplicate_count >1)
+
+#count the total number of duplicated trial ID
+total_duplicated_trial_ID <- duplicate_trial_ID %>%
+filter(n >1) %>%
+nrow()
+
+total_duplicated_trial_ID
+
+#No duplicates 
+
+
+#Dealing with missing data
+
+#1) Blank row: Identify blank rows and remove those rows with the following missing varibles: Therapuetic Area, Phase, Intervention and Sponsor. This was done because these are key predictors. To help train the model
+
+#none were identified
+missing_data_clinical_trial <-ct_gov_raw %>%
+filter(!if_all(c(`Conditions`, Phases, `Interventions`, Sponsor, Locations, `Study Status`, `Study Type`), ~ .== ""))
+
+#2) missing data: NA
+missing_data_2_clinical_trial <- missing_data_clinical_trial %>%
+filter(if_all(c(`Conditions`, Phases, Interventions, Locations), ~ is.na(.)))
+
+ct_gov_data <- missing_data_clinical_trial%>%
+filter(!if_all(c(`Conditions`, Phases, `Interventions`, Locations), ~ is.na(.)))
+
+#change dataset to lowercase for easier analysis
+
+mapping_1_ct_gov <- ct_gov_data%>%
+mutate(Sponsor = tolower(Sponsor))
+
+#Sponsor Mapping:Sponsor Type
+mapping_2_ct_gov <-ct_gov_data%>%
+mutate(Sponsor_Type =case_when(str_detect(Sponsor, "university|University|hospital|hospital|college|universitaire|universidade|universiteit
+|school|national cancer centre, singapore
+|m.d. anderson cancer center|Universidad|Universität|Langone|Anderson|Hershey
+|Mayo|The Cleveland Clinic|Universitat|Università
+|Hospices Civils de Lyon|Institut|Institutet|Postgraduate|Centre|Center|Université") ~ "Academic", str_detect(Sponsor, "Ministry|Naval|Army|US Department of Veterans Affairs|Military|Centers for Disease Control and Prevention
+|Center for Disease Control and Prevention
+|Defense and Veterans Center for Integrative Pain Management|National") ~ "Government", str_detect(Sponsor, "Company|Technologies|Pharmaceuticals|Pharmaceutical|Biopharmaceuticals
+|Therapeutics|Abbive|AbbVie|GlaxoSmithKline|LLC|Enterprises|Sanofi|Samsung|GmbH|Biopharma
+|Roche|Immunotherapeutics|Laboratories|Pfizer|Takeda
+|Bristol-Myers Squibb|Biogen|AstraZeneca|Merck|Bayer|Biotech|Novo
+|UnitedHealth Group|Biosciences|Amgen|Pharma|Abbott|Novartis|Baxter|Gilead|Quidel
+|Boehringer Ingelheim|Biopharm|Pharm|Genentech|Corporation|Biomedical|Technology|Unilever
+|Laboratoires|Ltd|Bioscience|Inc|Limited|Daiichi|GE Healthcare") ~ "Industry", TRUE ~ "Others"))
+
+#Therapeutic Area Mapping
+
+mapping_3_ct_gov <-mapping_2_ct_gov%>%
+mutate(Therapeutic_Area = case_when(str_detect(`Study Title`, "Vaccine") ~ "Vaccine",str_detect(Conditions, "cancer|glioblastoma|glioma|carcinoma|melanoma|neoplasm|neuroblastoma|neoplasms
+|sarcoma") ~ "Oncology", str_detect(Conditions, "chronic cidney diseases|renal disease|kidney disease") ~ "Nephrology", str_detect(Conditions, "heart|blood vessel diseases
+|heart failure|hypertension") ~ "Cardiovascular", str_detect(Conditions, "Autoimmune|Rheumatoid Arthritis|Arthritis|Psoriasis|Osteoarthritis") ~ "Immunology", str_detect(Conditions, "Virus|HIV|Hiv|Bacteria|Parasites|Malaria|Dengue|TB|Tuberculosis
+|COVID-19|Coronavirus") ~ "Infectious Diseases", str_detect(Conditions, "Brain|Nerve|Nerve Disorders|Alzheimers|Parkinson|Multiple Sclerosis|Traumatic Brain injury|Stroke|Dementia|Alzheimer|ALS") ~ "Neurology", str_detect(Conditions, "Depression|PTSD|Schizophrenia|Anxiety") ~ "Psychiatry/Mental Health", str_detect(Conditions, "Diabetes|Bone Diseases|Metabolic Disorders|Obesity|diabetes|Insulin|insulin") ~ "Metabolic/Endocrinology", str_detect(Conditions, "Asthma|Pulmonary|Respiratory|COPD|Pneumonitis") ~ "Respiratory", str_detect(Conditions, "Blood Disorders|Anemia|Sickel|Hemophilia|Thrombocytopenia|Myeloma|Leukemia") ~ "Hematology", str_detect(Conditions, "Liver|Hepatitis") ~ "Hepatology", str_detect(Conditions, "Vaccine|Vaccines") ~ "Vaccine", TRUE ~ "Others"))
+
+#Study Status Mapping
+
+mapping_4_ct_gov <-mapping_3_ct_gov%>%
+mutate(Enrollment_Status = case_when(str_detect(`Study Status`, "COMPLETED|ACTIVE_NOT_RECRUITING|TERMINATED|SUSPENDED|WITHDRAWN|ENROLLING_BY_INVITATION|UNKNOW") ~ "Actual", str_detect(`Study Status`, "RECRUITING|NOT_YET_RECRUITING|NO_LONGER_AVAILABLE|APPRROVED_FOR_MARKETING|AVAILABLE|TEMORARILY_NOT_AVAILABLE") ~ "Anticipated", TRUE ~ "Anticipated"))
+
+#Data tranformation: Intervention -> Investigational Product
+transform_1_ct_gov <- mapping_4_ct_gov%>%
+mutate(Investigational_Product = str_extract(Interventions, "^[^:]+"))
+
+#Data tranformation: Investigational Product (removal of underscore)
+transform_2_ct_gov <-transform_1_ct_gov%>%
+mutate(Investigational_Product= str_replace_all(Investigational_Product, "[\\_]", " ")) 
+
+#check data type for dataset
+str(transform_2_ct_gov)
+
+#Data tranformation:Primary Outcome Measures > tokenization of text and removal of punctuation and numbers and symbols
+
+transform_3_ct_gov <- transform_2_ct_gov%>%
+mutate(Primary_Outcome_Measures_1 = corpus(`Primary Outcome Measures`), Primary_Outcome_Measures_2 =tokens(`Primary Outcome Measures`, remove_punct = TRUE, remove_numbers = TRUE, remove_symbols = TRUE)
+ %>% as.list())
+
+#Data tranformation:Primary Outcome Measures > convert text in column Primary_Outcome_Measures_2 to lowercase
+
+transform_4_ct_gov <- transform_3_ct_gov%>%
+mutate(Primary_Outcome_Measures_3 = tolower(Primary_Outcome_Measures_2))
+
+#Data tranformation:Primary Outcome Measures > remove stop words
+#standard_english <- stopwords("en")
+#print(standard_english)
+
+#filter_stopwords <- function(words_vector){
+ # words_vector[!tolower(words_vector) %in% standard_english]
+#}
+
+
+
+transform_5_ct_gov <- transform_4_ct_gov%>%
+mutate(Primary_EndPoint =case_when(str_detect(Primary_Outcome_Measures_3, "time to|duration|days to|months to|years to") ~ "Time to Event", str_detect(Primary_Outcome_Measures_3, "count of participants|number of participants|count of units|frequency of|rate of|vital status") ~ "Discrete", str_detect(Primary_Outcome_Measures_3, "mean|median|level|concentration|value
+|standard deviation|area|percent|percentage|body composition") ~ "Continuous", TRUE ~ NA))
+  
+
+#transform_5_ct_gov <- transform_4_ct_gov %>%
+#mutate(Primary_Outcome_Measures_4 = lapply(Primary_Outcome_Measures_3,filter_stopwords))
+
+
+#transform_5_ct_gov <- transform_4_ct_gov%>%
+  #mutate(Primary_Outcome_Measures_4 = tokens_select(Primary_Outcome_Measures_3, pattern = quanteda::stopwords("en"), selection = "remove")%>% as.list())
+
+#mutate(Primary_Outcome_Measures_3 = str_replace_all(Primary_Outcome_Measures_3, "[\\|]", " "))
+
+#transform_5_ct_gov <- tokens_remove(transform_4_ct_gov, stopwords("en"))
+
+#extracting needed columns from clincaltrial.gov(ct_gov)
+#ct_gov <- subset(mapping_3_ct_gov, select = c("NCT Number", "Study Title", "Therapeutic_Area","Phases", "Enrollment_Status", "Enrollment", "Study Type", "Study Design", "Primary Outcome Measures","Study Results", "Locations", "Sponsor_Type, Start Date", "Completion Date"))
+
+#Data tranformation: Intervention Type
+#intervention_type_ct_gov <- study_status_mapping_ct_gov%>%
+#mutate(Investigational_Product = str_extract(Interventions, "^[^:]+"))
+
+#Data tranformation: Intervention Type (removal of underscore)
+#intervention_type_2_ct_gov <- intervention_type_ct_gov%>%
+#mutate(Investigational_Product= str_replace_all(Investigational_Product, "[\\_]", " ")) 
+ 
+#rename columns in mutated_sg_ct_gov
+#mutated_ct_gov <- intervention_type_2_---ct_gov %>%
+#rename(`Trial ID`= `NCT Number`, `Therapeutic Area`= `Therapeutic_Area`, `Enrollment Value`= `Enrollment`, `Sponsor Type`= `Sponsor_Type`, `Enrollment Status` = `Enrollment_Status`)
+
+
+#clean up Phases column: 
+#1) change all not applicable and N/A to NA
+#2)change all the uppercase letters to lower case and sperate the words from the number
+#3)change special character '|' and '-' with '/'
+#4)removed any double phase phase 
+
+#string_to_replace <- c("Not Applicable", "N/A", "not Applicable", "Not applicable")
+#string_to_replace_2 <- c("\\biv\\b"="phase 4", "\\biii\\b"="phase 3", "\\bii\\b"="phase 2", "\\bi\\b"="phase 1", "^1$" = "phase 1", "^2$" = "phase 2", "^3$" = "phase 3", "^4$" = "phase 4", "early phase 1"= "early_phase 1", "2/3" = "phase 2/phase 3", "1/2" = "phase 1/phase 2", "^phase 1/phase2$" = "phase 1/phase 2", "^phase 2/phase3$" = "phase 2/phase 3")
+
+#phase_cleanup_data_clinical_trial <- data_clinical_trial%>%
+#mutate(Phases = replace(Phases, Phases %in%  string_to_replace, NA), Phases=tolower(Phases), Phases=str_replace(Phases, "([a-z])(\\d)", "\\1 \\2"), Phases = str_replace_all(Phases, "[\\,\\-\\|]", "/"), Phases = str_replace_all(Phases, string_to_replace_2), Phases = str_replace_all(Phases, "(\\b\\w+\\b)(\\s+\\1)+", "\\1"))
+
+
+#Address Phase NA data for Observational and Expanded Access Studies
+
+#data_1_clinical_trial <-phase_cleanup_data_clinical_trial%>%
+#mutate(Phases = case_when(is.na(Phases) & `Study Type`== "OBSERVATIONAL"|`Study Type` == "EXPANDED_ACCESS" ~ "No_phase", TRUE ~ Phases))   
+
+
+
+#incomplete <- phase_cleanup_data_clinical_trial%>%
+#filter(!(Phases %in% c("phase 1","phase 2", "phase 3", "phase 4", "phase 1/phase 2", "phase 2/phase 3", "phase 3/phase 4", "early_phase 1"))) %>% filter(`Study Type` == "EXPANDED_ACCESS") 
+ 
+
+
+#Sponsor <- data_1_clinical_trial%>%
+#filter(if_any(c(Interventions), ~is.na(.))) 
+
+
+#study_status <- phase_cleanup_data_clinical_trial%>%
+#filter(!(`Study Status` %in% c("COMPLETED","ACTIVE_NOT_RECRUITING", "TERMINATED", "SUSPENDED", "WITHDRAWN", "ENROLLING_BY_INVITATION", "UNKNOWN", "RECRUITING", "NOT_YET_RECRUITING", "NO_LONGER_AVAILABLE")))
+
+
+```
+
+```{r}
+#Random Forest: Prediticing missing value phasse value for interventional studies 
+RF_ct_gov <- select(data_1_clinical_trial, c("Phases", "Sponsor Type","Study Status", "Study Type", "Therapeutic Area", "Primary Outcome Measures", "Study Design", "Investigational Product", "Enrollment Status"))
+
+train_ct_gov <- RF_ct_gov%>%
+filter(`Study Type`== "INTERVENTIONAL")
+
+check <- train_ct_gov%>%
+filter(if_any(c(`Primary Outcome Measures`), ~is.na(.)))
+
+#Check if each predictor is a character
+class(train_ct_gov$`Primary Outcome Measures`)
+
+#Convert all the character columns to factor
+factor_column <- c("Phases", "Sponsor Type", "Study Status", "Study Type", "Therapeutic Area", "Primary Outcome Measures", "Study Design", "Intervention Type", "Enrollment Status")
+train_ct_gov[factor_column] <- lapply(train_ct_gov[factor_column], as.factor)
+
+str(train_ct_gov)
+
+#Split the data for training and testing 
+train_index <- sample(1:nrow(train_ct_gov), 0.7*nrow(train_ct_gov))
+
+#Training data
+train_data <- train_ct_gov[train_index, ]
+
+#Testing data
+test_data <- train_ct_gov[-train_index, ]
+
+#Random Forest Model
+
+
+
+```
+
+```         
+```
